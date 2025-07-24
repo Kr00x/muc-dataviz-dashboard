@@ -1,30 +1,69 @@
-# 📊 Munich DataViz Dashboard
+# Munich DataViz Dashboard
 
-**Interactive R/Shiny Dashboard** zur Untersuchung des Zusammenspiels von Tourismus, Wohnungsbau und Mietentwicklung in München (2013–2025).
+An interactive R/Shiny application for analyzing relationships between tourism, housing permits, and rental prices in Munich (2013–2025).
 
----
+## Features
 
-## 🚀 Features
+* **Interactive Heatmap:** Rental prices (€/m²) by building year and apartment size
+* **Time Series:** Population, overnight stays, and average rental prices over time
+* **Per Capita Analysis:** Housing permits issued per 1,000 residents
+* **Customizable Filters:** Explore data by year, city district, and apartment size
+* **Data Export:** Download displayed data as CSV
 
-- **Heatmap**: Durchschnittsmiete pro m² nach Baujahr und Wohnungsgröße  
-- **Zeitreihen**: Vergleich von Bevölkerungs- und Tourismus‑Wachstum vs. Mietpreisentwicklung  
-- **Per‑Capita‑Barplot**: Genehmigte Wohnungen pro 1.000 Einwohner  
-- **Interaktive Analyse**: Filter nach Jahr, Bezirk und Wohnflächenklasse  
-- **Datenexport**: CSV-Download aller aktuell angezeigten Daten
+## Requirements
 
----
+* **R (≥4.2)**
+* **renv** for package management
+* (Optional) **Docker & Docker Compose** for container deployment
 
-## 📦 Voraussetzungen
+## Setup & Usage
 
-- R (≥ 4.2)  
-- [renv](https://rstudio.github.io/renv/)  
-- Docker & Docker Compose (optional, für Container-Deployment)
+1. **Clone the Repository**
 
----
+```bash
+git clone https://github.com/<your-username>/munich-dataviz-dashboard.git
+cd munich-dataviz-dashboard
+```
 
-## ⚙️ Installation
+2. **Install Dependencies**
 
-1. **Repository klonen**  
-   ```bash
-   git clone https://github.com/<dein-user>/munich-dataviz-dashboard.git
-   cd munich-dataviz-dashboard
+```r
+renv::restore()
+```
+
+3. **Run the App**
+
+* Using R:
+
+```r
+shiny::runApp()
+```
+
+* Using Docker:
+
+```bash
+docker-compose up --build
+```
+
+## Project Structure
+
+```
+munich-dataviz-dashboard/
+├── data/            # Raw and processed datasets
+├── figures/         # Static image outputs
+├── scripts/         # Data processing scripts
+├── app.R            # Main Shiny app file
+├── report.Rmd       # R Markdown analysis report
+├── install.R        # R package installation script
+└── renv.lock        # Package version snapshot
+```
+
+## Data Sources
+
+* **Mietspiegel 2025** – City of Munich
+* **Population & Tourism Data** – BY-Open-Data
+* **Building Permits** – BY-Open-Data
+
+## License
+
+MIT © 2025 Kilian Maier

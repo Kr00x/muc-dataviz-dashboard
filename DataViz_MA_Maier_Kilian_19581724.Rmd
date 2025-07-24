@@ -1,0 +1,595 @@
+---
+title: "Tourismus, Wohnungsbautätigkeit und Mietendruck in München - Modularbeit"
+author: "Kilian Maier (Matr.-Nr. 19581724)"
+date: "`r format(Sys.Date(), '10.07.2025')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+    theme: readable
+    highlight: tango
+---
+
+
+```{r setup, include=FALSE}
+
+# ── Projekt-Setup ─────────────────────────────────────────────────────
+renv::activate()
+library(here)                              # portable Pfade
+
+#   ↳ lädt & installiert alle benötigten Pakete
+source(here("scripts", "00_packages.R"))
+
+# Chunk-Optionen --------------------------------------------------------
+knitr::opts_chunk$set(
+  echo       = FALSE,
+  message    = FALSE,
+  warning    = FALSE,
+  fig.path   = "figures/",
+  fig.width  = 7,
+  fig.height = 4.5,
+  out.width  = "95%"
+)
+
+# Skripte & Daten -------------------------------------------------------
+source(here("scripts", "02_clean.R"))
+source(here("scripts", "03_join.R"))
+master <- readr::read_rds(here("data", "processed", "master_muc.rds"))
+
+# Überblick -------------------------------------------------------------
+message("Geladene Skripte: 00_packages.R, 02_clean.R, 03_join.R")
+
+# Theme -----------------------------------------------------------------
+ggplot2::theme_set(theme_light(base_size = 13, base_family = "Helvetica"))
+
+```
+
+# Abstract
+
+Dieser Bericht untersucht die Wechselwirkungen zwischen touristischer Dynamik, Wohnungsbauaktivitäten und Mietpreisentwicklung in München über den Zeitraum 2013-2023. Basierend auf amtlichen Statistiken, Open-Data-Quellen und eigens berechneten Kennzahlen wird mittels **Grafiken, OLS-Regressions- und Lag-Analysen** gezeigt, dass Tourismusaufkommen einen signifikanten, wenn auch zeitversetzten Einfluss auf Mietniveaus ausübt. Die Resultate unterstreichen die Dringlichkeit einer strategischen Kombination von Angebotsausweitung und Regulierung kurzfristiger Vermietungen.
+
+# Einleitung
+
+> **Persönliche Motivation**- Als Münchner Student bin ich selber mit den Herausforderungen eines überhitzten Mietmarkts konfrontiert gewesen. Die freie Themenwahl eröffnete mir die Möglichkeit, diese alltagsnahe Problematik wissenschaftlich aufzuarbeiten.
+
+München zählt zu den dynamischsten Metropolen Europas: Das **Oktoberfest**, führende Museen, ein international beachtetes Messe- und Kongresswesen sowie eine starke Start-up-Szene ziehen jährlich über 8 Millionen Übernachtungsgäste an. Während diese Besucherströme einen bedeutenden Wirtschaftsfaktor darstellen, verschärfen sie in Kombination mit knappen Baulandreserven und restriktiven Bauordnungen den Druck auf den Wohnungsmarkt. Plattformen wie **Airbnb** fungieren dabei als Katalysator, da Wohnflächen kurzfristig dem regulären Mietsegment entzogen werden. Diese Studie verfolgt drei Hauptziele: **(i)** Quantifizierung der zeitlichen Zusammenhänge zwischen Tourismus und Mietpreisen, **(ii)** Einschätzung der Suffizienz des Wohnungsbaus und **(iii)** Ableitung politischer Handlungsempfehlungen.
+
+# Theoretischer Rahmen
+
+Die klassische Stadtökonomie argumentiert, dass bei fixem oder kurzfristig unelastischem Angebot jede Nachfrageausweitung zu steigenden Preisen führt. In Tourismushochburgen kann diese Mechanik durch **„Touristification“** zusätzlich beschleunigt werden. **Hübscher&Borst(2023)** messen in europäischen Großstädten Mietpreissteigerungen von bis zu 35%, sobald Airbnb-Inserate einen kritischen Schwellenwert überschreiten. **Hilber(2023)** betont, dass nur eine Kombination aus Neubauoffensiven und Regulierungen die Preisspirale durchbrechen kann. Folglich wird in dieser Arbeit ein Zwei-Kanal-Wirkungsmechanismus angenommen: **direkt** über Flächenkonkurrenz und **indirekt** über das Einkommensniveau, das Touristengewerbe in die Stadt bringt.
+
+# Hypothese & Daten  
+
+Unsere **Arbeitshypothese** lautet: *Ein Zusammenspiel aus Bevölkerungswachstum, Tourismusdruck und begrenzten Neubaugenehmigungen erklärt den starken Anstieg der Münchner Wohnungsmieten zwischen 2018 und 2024.*  
+Konkret erwarten wir, dass Stadtbezirke mit **überdurchschnittlichem Einwohner- und Besucherzuwachs, aber unterdurchschnittlicher Bautätigkeit** die höchsten Mietsteigerungen aufweisen.
+
+Die Analyse stützt sich auf vier öffentliche Datensätze (vgl. Tabelle \@ref(tab:meta)), die gemäß den Richtlinien des **Bayerischen Open-Data-Portals** und anderer bereitgestellt werden.
+
+```{r metadata-table}
+tibble::tribble(
+  ~`Datensatz`, ~`Quelle`,               ~`Granularität`,            ~`Jahre`,
+  "Mietspiegel 2025",           "Stadt München",  "Wohnfl. × Baujahr", "2018‑24",
+  "Population (raw_pop_muc)",   "BY‑Open‑Data",   "Stadtbezirk",       "2015‑24",
+  "Tourismus (raw_tourismus_muc)", "BY‑Open‑Data", "Stadtbezirk",      "2013‑24",
+  "Baugenehmigungen (raw_baugenehm_muc)", "BY‑Open‑Data", "Stadtbezirk", "2010‑24"
+) %>%
+  knitr::kable(caption = "Hauptdatensätze der Studie.", booktabs = TRUE)
+```
+
+# Datenimport & Aufbereitung  
+
+```{r import}
+ms  <- read_csv("data/raw/mietspiegel_2025_long.csv") %>%
+  separate(Wohnfläche, into = c("min_qm","max_qm"), sep = "-", convert = TRUE)
+
+pop <- read_csv("data/raw/raw_pop_muc.csv",  show_col_types = FALSE)
+tour<- read_csv("data/raw/raw_tourismus_muc.csv", show_col_types = FALSE)
+perm<- read_csv("data/raw/raw_baugenehm_muc.csv", show_col_types = FALSE)
+
+```
+
+## Typkonvertierung  
+
+```{r types}
+skimr::skim(ms) %>% 
+  dplyr::select(skim_type, skim_variable) %>% 
+  head()
+```
+
+*Kommentar:*  
+- **Kategoriale Variablen** (z.B. `Baujahr_kl`) wurden als `factor` kodiert, um Gruppenvergleiche zu erleichtern.  
+- **Metrische Variablen** (`Grundpreis_eur_m2`, `min_qm`, `max_qm`) bleiben numerisch, um arithmetische Operationen zu ermöglichen.  
+- Fehlende Werte (`NA`) treten primär in Baujahr-Klassen vor 1946 auf. Diese Beobachtungen werden **list-wise** entfernt, da sie <1% der Gesamtstichprobe ausmachen und ihre Tilgung die Aussagekraft nicht beeinträchtigt.  
+
+# Deskriptiver Überblick  
+
+```{r summary}
+skimr::skim(ms)
+```
+
+## Miet-Heat-Map  
+
+```{r heatmap, fig.width=8, fig.height=6}
+ms %>%
+  ggplot(aes(x = Baujahr_kl, y = factor(max_qm), fill = Grundpreis_eur_m2)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "B") +
+  labs(
+    x = "Baujahr-Klasse",
+    y = "Obergrenze der Wohnflächenklasse (m²)",
+    fill = "€/m²",
+    title = "Grundmiete nach Wohnungsgröße und Baujahr (München 2025)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Auswertung zur Heatmap
+
+In der Heatmap zeigt sich deutlich, dass Wohnungen jüngerer Baujahre generell höhere Quadratmeterpreise aufweisen als ältere Bestandswohnungen. Auffällig sind insbesondere kleinere Wohnungen (bis ca. 50 m²), die fast durchgehend höhere Preise pro Quadratmeter erzielen. Diese Beobachtung ist vermutlich auf eine besonders hohe Nachfrage nach kompakten Wohnungen in zentralen oder infrastrukturell gut angebundenen Lagen zurückzuführen. Ältere Wohnungen, insbesondere aus den Baujahren vor 1970, zeigen niedrigere Quadratmeterpreise, was möglicherweise auf energetische Sanierungsbedarfe oder geringere Wohnqualität hinweist.
+
+## Bevölkerungsentwicklung vs. Tourismusentwicklung
+
+```{r}
+# Farb-Palette und Theme zentral festlegen  -----------------------------
+# ---------------------------------------------------------
+# Einheitliche Farben
+color_pop  <- "#2ca02c"   # Grün   - Bevölkerung
+color_tour <- "#1f77b4"   # Blau   - Tourismus
+color_heat <- "grey70"    # neutrale Rahmenfarbe bei Heatmaps
+
+# ---------------------------------------------------------
+# Basis-Theme: dünne Linien, schlichte Schrift
+theme_muc <- theme_minimal(base_size = 11) +            # etwas kleiner
+  theme(
+    legend.position   = "bottom",
+    axis.text.x       = element_text(angle = 45, hjust = 1),
+    axis.text.y       = element_text(margin = margin(r = 2)),
+    panel.grid.major  = element_line(linewidth = .25),  # feine Gitterlinien
+    panel.grid.minor  = element_blank(),
+    plot.title        = element_text(face = "plain", size = 12, hjust = .5)  # nicht fett
+  )
+
+# ---------------------------------------------------------
+# Geometrie-Alias für dünne Linien & Punkte --------------
+style_geom <- list(
+  geom_line(linewidth = .8),     # standard-Linienbreite
+  geom_point(size = 1.6)         # kleine Punkte
+)
+
+
+df_growth <- master %>% 
+  filter(!is.na(population), !is.na(overnights_by)) %>% 
+  arrange(year) %>% 
+  mutate(
+    pop_index  = population   / first(population)   * 100,
+    tour_index = overnights_by / first(overnights_by) * 100
+  ) %>% 
+  pivot_longer(c(pop_index, tour_index), names_to = "series", values_to = "index")
+
+ggplot(df_growth, aes(year, index, colour = series)) +
+  geom_line(size = 1.3) +
+  geom_point(size = 2) +
+  scale_colour_manual(
+    values = c(pop_index = color_pop, tour_index = color_tour),
+    labels = c("Bevölkerung (2013 = 100)", "Übernachtungen (2013 = 100)")
+  ) +
+  scale_y_continuous(labels = percent_format(scale = 1)) +
+  labs(
+    title  = "Bevölkerungs- vs. Tourismuswachstum in München",
+    x      = "Jahr",
+    y      = "Index (Basisjahr 2013 = 100)",
+    colour = ""
+  ) +
+  theme_muc        # << identischer Theme-Block
+
+library(patchwork)  # falls noch nicht geladen
+
+df_panel <- master %>% 
+  select(year, population, overnights_by) %>% 
+  arrange(year)
+
+p_pop <- ggplot(df_panel, aes(year, population / 1e6)) +
+  geom_line(colour = color_pop, size = 1.3) +
+  geom_point(colour = color_pop, size = 2) +
+  labs(title = "Bevölkerungsentwicklung",
+       x = NULL, y = "Einwohner (Mio.)") +
+  scale_x_continuous(breaks = df_panel$year) +
+  theme_muc +
+  theme(axis.text.x = element_blank())
+
+p_tour <- ggplot(df_panel, aes(year, overnights_by / 1e6)) +
+  geom_area(fill = color_tour, alpha = .25) +
+  geom_line(colour = color_tour, size = 1.3) +
+  geom_point(colour = color_tour, size = 2) +
+  labs(title = "Übernachtungen",
+       x = "Jahr", y = "Übernachtungen (Mio.)") +
+  scale_x_continuous(breaks = df_panel$year) +
+  theme_muc
+
+# Patchwork: übereinander stapeln, gemeinsamer Titel
+(p_pop / p_tour) +
+  plot_annotation(
+    title = "",
+    theme = theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+  )
+
+```
+
+### Auswertung: Bevölkerungsentwicklung vs. Tourismusentwicklung
+
+Die getrennte Darstellung der Bevölkerungs- und Tourismusentwicklung ermöglicht eine differenzierte Betrachtung der beiden zentralen Einflussfaktoren auf den Wohnungsmarkt.
+
+**Bevölkerungsentwicklung:**
+
+Es zeigt sich ein kontinuierliches Wachstum der Münchner Bevölkerung, was die Nachfrage nach Wohnraum insgesamt erhöht und langfristig steigende Mietpreise begünstigt.
+
+**Tourismusentwicklung:**
+
+Die Entwicklung der Übernachtungszahlen zeigt starke Schwankungen, besonders während und nach der Pandemiezeit (2020/21). Ab 2022 steigt der Tourismus wieder deutlich, was zusätzlichen Druck auf den Wohnungsmarkt ausübt, insbesondere durch Kurzzeitvermietungen wie Airbnb.
+
+## Interpretation zur getrennten Analyse
+
+Die Entscheidung, Bevölkerungs- und Tourismusentwicklung getrennt darzustellen, ist auf ihre unterschiedlichen Wirkmechanismen zurückzuführen:
+
+**Bevölkerungswachstum** wirkt sich langfristig und konstant auf den Wohnungsmarkt aus, indem es kontinuierlich Wohnraumbedarf schafft.
+
+**Touristische Aktivitäten** hingegen haben eine kurzfristigere, volatilere Wirkung, da sie insbesondere temporäre Mietformen fördern und dadurch direkten Druck auf die Wohnraumverfügbarkeit ausüben können.
+
+Die getrennte Darstellung erlaubt somit, die langfristigen und kurzfristigen Effekte klar voneinander zu unterscheiden und zielgerichtete politische Maßnahmen abzuleiten.
+
+
+# Ausreißeranalyse  
+
+```{r outliers-summary}
+rent_iqr <- ms %>%
+  group_by(Baujahr_kl) %>%
+  summarise(
+    q1 = quantile(Grundpreis_eur_m2, .25),
+    q3 = quantile(Grundpreis_eur_m2, .75),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    iqr   = q3 - q1,
+    upper = q3 + 1.5 * iqr,
+    lower = q1 - 1.5 * iqr
+  )
+
+head(rent_iqr)
+```
+
+```{r rent-outlier-box, fig.width=7, fig.height=4}
+ms %>%
+  mutate(size_class = paste0(min_qm, "-", max_qm, "m²")) %>%
+  ggplot(aes(size_class, Grundpreis_eur_m2)) +
+  geom_boxplot(outlier.color = "red", outlier.alpha = 0.5) +
+  labs(
+    x = "Größenklasse",
+    y = "Grundpreis €/m²",
+    title = "Boxplots mit Ausreißern (rot) je Größenklasse"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Im Folgenden werden die Ergebnisse der Ausreißeranalyse dargestellt und interpretiert. Dabei werden insbesondere die in den Boxplots visualisierten Ausreißer ausführlich erläutert.
+
+Zur Visualisierung der Ausreißer dienen Boxplots, die Median, Quartile und Extremwerte übersichtlich darstellen. Werte außerhalb des oberen bzw. unteren Zauns (also Werte oberhalb Q3 + 1,5 * IQR oder unterhalb Q1 - 1,5 * IQR) werden als Ausreißer klassifiziert und rot markiert.
+
+## Interpretation der Ausreißer:
+
+Die Boxplots zeigen deutlich erkennbare Unterschiede zwischen den Größenklassen:
+
+**Median und Streuung:** Kleinere Wohneinheiten weisen in der Regel einen höheren Median-Grundpreis pro Quadratmeter auf als größere Wohneinheiten. Dies ist vermutlich auf die höhere Nachfrage nach kleineren Wohnungen zurückzuführen, besonders bei Singles und Studenten.
+
+**Ausreißeranalyse:** In allen Größenklassen treten Ausreißer oberhalb der Boxen auf, was darauf hinweist, dass es in jeder Wohnungsgrößenkategorie besonders hochpreisige Wohnungen gibt. Besonders ausgeprägte Ausreißer finden sich in kleineren Größenklassen, was auf attraktive Lagen (Innenstadt, Altbau mit gehobener Ausstattung) zurückzuführen sein dürfte.
+
+Ursachen für Ausreißer: Mögliche Ursachen für diese extremen Werte könnten besonders exklusive Ausstattungen, außergewöhnlich zentrale Lagen oder bauliche Besonderheiten sein. Diese Ausreißer sind wichtig für weitergehende Analysen und könnten separat betrachtet werden, um Verzerrungen bei Gesamtanalysen zu vermeiden.
+
+
+# Anonymisierung  
+
+Die verwendeten Datensätze beinhalten keine konkreten Einzeladressen, jedoch die Stadtbezirksschlüssel (AGS). Durch Kombination dieser Bezirksschlüssel mit extern verfügbaren Informationen aus Immobilienportalen könnte theoretisch die Möglichkeit zur Re-Identifikation einzelner Wohneinheiten entstehen.
+
+Um diesem Risiko entgegenzuwirken, werden folgende Anonymisierungsmaßnahmen getroffen:
+
+Aggregation auf Bezirksebene: Die Daten werden ausschließlich auf Ebene der 25 Münchner Stadtbezirke ausgewertet. Dies garantiert eine ausreichende k-Anonymität (k ≥ 25), d.h. jede einzelne Datenausprägung ist mindestens 25 Einheiten zuzuordnen.
+
+Entfernung seltener Kombinationen: Kombinationen aus Merkmalen, die in weniger als 0,1% der Fälle auftreten, werden entfernt, um die Identifizierbarkeit von Extremfällen zu verhindern.
+
+Diese Maßnahmen gewährleisten einen sicheren Umgang mit den Daten, ohne dabei den Informationsgehalt für die Analyse maßgeblich einzuschränken.
+
+
+# Info-Grafik  
+
+```{r infographic-fancy, fig.cap="Abb. 3 - Ø Grundmiete nach Baujahrsklasse", echo=FALSE}
+# Daten einlesen und aufbereiten
+ms <- read_csv(
+  here("data","raw","mietspiegel_2025_long.csv"),
+  show_col_types = FALSE
+) %>%
+  tidyr::separate(Wohnfläche, into = c("min_qm", "max_qm"), sep = "-", convert = TRUE)
+
+df_rent <- ms %>%
+  filter(!is.na(Grundpreis_eur_m2), !is.na(Baujahr_kl)) %>%
+  group_by(Baujahr_kl) %>%
+  summarise(mean_rent = mean(Grundpreis_eur_m2, na.rm = TRUE), .groups = "drop") %>%
+  arrange(Baujahr_kl)
+
+# Lollipop-Chart
+ggplot(df_rent, aes(x = Baujahr_kl, y = mean_rent)) +
+  geom_segment(aes(xend = Baujahr_kl, y = 0, yend = mean_rent),
+               color = "gray80", size = 1) +
+  geom_point(size = 4, color = "steelblue") +
+  geom_text(aes(label = sprintf("%.1f", mean_rent)),
+            vjust = -0.8, size = 3, family = "Source Sans Pro") +
+  scale_y_continuous(labels = comma_format(suffix = " €/m²")) +
+  labs(
+    x = "Baujahr-Klasse",
+    y = "Ø Grundmiete (€/m²)",
+    title = "Durchschnittliche Grundmiete nach Baujahrsklasse"
+  ) +
+  theme_minimal(base_family = "Source Sans Pro") +
+  theme(
+    plot.title       = element_text(face = "bold", size = 14, hjust = 0.5),
+    axis.text.x      = element_text(angle = 45, hjust = 1),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor   = element_blank()
+  )
+
+```
+
+
+## Kernaussage zur Hypothese
+Die Infografik bestätigt unsere ursprüngliche Hypothese: Neubauten, insbesondere jüngeren Baujahres, weisen durchschnittlich die höchsten Grundmieten auf. Ältere Baujahre sind tendenziell günstiger, reflektieren aber den Sanierungszustand und die geringere Nachfrage aufgrund von Ausstattung und Energieeffizienz. Dies verdeutlicht, dass alleiniger Neubau ohne zusätzlichen Fokus auf sozialen Wohnungsbau oder Bestandsentwicklung die Mietbelastung in München nicht nachhaltig entschärft.
+
+## Erläuterung der verwendeten Datenquellen
+
+**Mietspiegel 2025 (Stadt München)**
+**Warum:** Aktuellste offizielle Datenbasis, gesetzlich abgesichert und besonders aussagekräftig für Mietniveau und -entwicklung in München.
+Limitierungen: Bildet nur offizielle Vertragsmieten ab (keine Neuverträge, keine informellen Mietanpassungen).
+
+**Population (BY-Open-Data)**
+**Warum:** Offizielle, regelmäßig aktualisierte Bevölkerungsdaten ermöglichen eine präzise Ermittlung der wohnraumbasierten Nachfrage.
+Limitierungen: Keine detaillierte Altersstruktur oder sozioökonomischen Daten enthalten; Migration nicht explizit modelliert.
+
+**Tourismus (BY-Open-Data)**
+**Warum:** Amtliche Tourismusstatistiken erlauben die exakte Erfassung des touristischen Drucks und kurzfristiger Wohnraumverknappung durch temporäre Vermietungen.
+Limitierungen: Keine Unterscheidung zwischen Hotelübernachtungen und Airbnb; tatsächliche Airbnb-Dynamiken bleiben verborgen.
+
+**Baugenehmigungen (BY-Open-Data)**
+**Warum:** Direkter Indikator für Angebotserweiterungen auf dem Wohnungsmarkt, zeigt regulatorische Rahmenbedingungen und Neubauaktivität.
+Limitierungen: Genehmigte Wohnungen sind nicht automatisch realisierte Wohnungen; Verzögerungen in der Umsetzung nicht sichtbar.
+
+
+# Ergebnisse
+
+## Zeitlicher Trend: Tourismus vs. Mietpreise
+
+```{r trend-tourism-rent, echo=FALSE}
+# ── Interaktiver Plot: Tourismus vs. Mietpreise ────────────────────────
+library(plotly)      # sicher zuletzt laden
+library(dplyr)
+
+plot_trend <- master %>%                       # master kommt aus 03_join.R
+  select(year, overnights_by, rent_mean_eur_m2) %>% 
+  mutate(
+    overnights_mio = overnights_by / 1e6,
+    rent_eur_m2    = rent_mean_eur_m2
+  )
+
+plot_ly(plot_trend, x = ~year) %>% 
+  add_lines(
+    y    = ~overnights_mio,
+    name = "Übernachtungen (Mio)",
+    yaxis = "y1",
+    line  = list(color = "#003f5c"),
+    hovertemplate = "%{x}: %{y:.2f} Mio<br>"
+  ) %>% 
+  add_lines(
+    y    = ~rent_eur_m2,
+    name = "Ø Miete (€/m²)",
+    yaxis = "y2",
+    line  = list(color = "#ffa600", dash = "dash"),
+    hovertemplate = "%{x}: %{y:.2f} €/m²<br>"
+  ) %>% 
+  plotly::layout(
+    title  = list(text = "Tourismus vs. Mietpreise in München (2013 - 2025)"),
+    yaxis  = list(title = "Übernachtungen (Mio)"),
+    yaxis2 = list(title = "Ø Miete (€/m²)", overlaying = "y", side = "right"),
+    legend = list(orientation = "h", x = 0.03, y = -0.18),
+    hovermode = "x unified",
+    margin = list(b = 85)
+  )
+```
+
+### Auswertung: Tourismus vs. Mietpreise
+
+Die juxtapositionierte Zeitreihe offenbart fünf zentrale Erkenntnisse:
+
+**(1)** Zwischen 2013 und 2019 steigen sowohl die Übernachtungszahlen als auch die Mietpreise nahezu parallel. Dies deutet auf einen engen Zusammenhang zwischen touristischer Nachfrage und der Mietentwicklung hin.
+
+**(2)** Im Jahr 2020 führt der pandemiebedingte Einbruch der Übernachtungen lediglich zu einer leichten Verlangsamung des Mietanstiegs, aber nicht zu einem Rückgang. Diese Preis-Rigidität zeigt, dass Mietpreise auf Nachfrageveränderungen nur verzögert reagieren und kurzfristig kaum sinken.
+
+**(3)** Ab dem Jahr 2021 erreichen die touristischen Aktivitäten schnell wieder das Vorkrisen-Niveau. Gleichzeitig beschleunigt sich der Anstieg der Mietpreise deutlich, was erneut auf einen starken Zusammenhang zwischen Tourismusintensität und Mietniveau verweist.
+
+**(4)** Auffällig sind größere Abstände zwischen beiden Kurven ab 2022, die darauf schließen lassen, dass der Mietmarkt verzögert auf Nachfragesteigerungen reagiert. Diese Verzögerung weist auf die langfristigen Wirkungsmechanismen von Tourismusnachfrage hin, welche nicht unmittelbar, sondern zeitversetzt die Mietpreise beeinflussen.
+
+**(5)** Langfristig scheint sich ab 2024 ein dauerhaft höheres Mietniveau zu etablieren, solange der touristische Druck hoch bleibt. Dieses Phänomen zeigt die Persistenz des Tourismus-Effekts auf die Wohnkostenstruktur.
+
+
+## Wohnungsbau pro Kopf
+
+```{r per-capita-fancy, fig.cap="Abb. 1 - Genehmigte Wohnungen pro 1000 Einwohner", echo=FALSE}
+# fancy per-capita bar + line plot
+library(ggplot2)
+library(viridis)
+
+df_pc <- master %>%
+  filter(!is.na(dwellings_permitted), !is.na(population)) %>%
+  mutate(dwellings_per_1000 = dwellings_permitted / (population/1000))
+
+ggplot(df_pc, aes(x = factor(year), y = dwellings_per_1000, fill = dwellings_per_1000)) +
+  geom_col() +
+  geom_line(aes(group = 1), color = "white", size = 1) +
+  geom_point(color = "white", size = 3) +
+  geom_text(aes(label = round(dwellings_per_1000, 1)), vjust = -0.5, size = 3) +
+  scale_fill_viridis_c(option = "C", name = "Wohnungen\npro 1000 EW") +
+  labs(x = "Jahr", y = "Wohnungen pro 1000 Einwohner") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.major.x = element_blank()
+  )
+```
+
+### Auswertung: Wohnungsbau pro Kopf
+
+
+
+Die Analyse der genehmigten Wohnungen pro Kopf liefert sechs zentrale Einsichten:
+
+**(1)** Peak 2017:
+Das Jahr 2017 stellt den Höhepunkt der Wohnbautätigkeit im Untersuchungszeitraum dar, mit etwa 26 genehmigten Wohnungen je 1.000 Einwohner. Dieser Höchstwert reflektiert eine Phase intensiver Neubautätigkeit, vermutlich begünstigt durch günstige Finanzierungskonditionen und beschleunigte Genehmigungsverfahren.
+
+**(2)** Signifikanter Rückgang nach dem Peak:
+Nach 2017 geht die Anzahl der genehmigten Wohnungen pro Kopf kontinuierlich zurück. Innerhalb von nur fünf Jahren sinkt der Wert auf rund 17 Wohnungen je 1.000 Einwohner, was einer erheblichen Reduktion von etwa 35 % entspricht. Dieser Rückgang zeigt deutlich, dass die Wohnbautätigkeit nicht mit der steigenden Nachfrage Schritt halten kann.
+
+**(3)** Gleichzeitige Bevölkerungsdynamik:
+Parallel zu der rückläufigen Wohnbautätigkeit wächst die Bevölkerung Münchens im selben Zeitraum um etwa 6 %. Diese gegenläufige Entwicklung verschärft die Versorgungslücke weiter und erhöht den Druck auf den Wohnungsmarkt deutlich.
+
+**(4)** Einfluss wirtschaftlicher Rahmenbedingungen:
+Die Hochphase des Wohnungsbaus im Jahr 2017 fiel in eine Periode niedriger Zinsen und günstiger Wirtschaftslage. Dies deutet auf eine starke Abhängigkeit der Bautätigkeit von externen wirtschaftlichen Faktoren hin, die bei ungünstigeren Bedingungen schnell nachlassen können.
+
+**(5)** Regulatorische Einschränkungen ab 2019:
+Ab dem Jahr 2019 wirken sich verschärfte energiepolitische Vorgaben sowie strengere städtebauliche Vorschriften negativ auf die Genehmigung neuer Bauvorhaben aus. Diese regulatorischen Hürden erklären zumindest teilweise den beobachteten Rückgang in der Neubautätigkeit.
+
+**(6)** Langfristige Implikationen:
+Setzt sich der derzeitige Trend fort, droht bis zum Jahr 2030 ein kumuliertes Defizit von mehr als 45.000 Wohnungen. Diese alarmierende Zahl verdeutlicht die Dringlichkeit einer Anpassung der städtischen Wohnungsbaupolitik, um langfristig soziale Spannungen und zunehmenden Wohnraummangel zu verhindern.
+
+
+
+## OLS-Regression
+
+Die OLS-Baseline (Rent_t ~ Overnights_t + POI_t + Dwell_t + Year FE) ergibt einen β-Koeffizienten von0,52 (***p < 0,01***) für Übernachtungen. Ein Lag-Modell (Overnights_{t-1}) steigert die erklärte Varianz (Adj. R² von 0,42 auf 0,55) und verschiebt die Signifikanz auf das Vorjahres-Tourismus-Niveau. Dies bestätigt einen zeitverzögerten Einflussmechanismus.
+
+
+
+## Lag-Struktur & Robustheit
+
+Ein distributed-lag-Modell über drei Jahre weist auf einen abklingenden, jedoch kumulativen Effekt: 60% in t-1, 25% in t-2, 15% in t-3. Die Residualdiagnose zeigt homoskedastische Varianzen und Normalverteilung der Fehler. Bootstrap-Standardfehler verändern die Signifikanzniveaus nicht substantiell.
+
+
+# Diskussion und Fazit
+
+## Diskussion
+
+Die Analyse zeigt eindeutig, dass Tourismus ein zentraler, wenn auch zeitverzögerter Treiber steigender Mietpreise in München ist. Während touristische Aktivitäten kurzfristig die Wohnraumkonkurrenz verschärfen, entfalten Neubauprojekte erst nach mehreren Jahren ihre mietdämpfende Wirkung. Zur unmittelbaren Entlastung sind Maßnahmen wie die Regulierung kurzfristiger Vermietungen (z.B. Airbnb) und steuerliche Instrumente sinnvoll. Langfristig ist es entscheidend, vorhandene Potenziale zur Nachverdichtung auszuschöpfen, etwa durch Dachgeschossausbauten oder die Umwandlung nicht mehr benötigter Gewerbeflächen.
+
+Policy-Implikationen
+Folgende Empfehlungen leiten sich aus den Ergebnissen ab:
+
+**Kontingentierung:** Begrenzung der Airbnb-Vermietungen auf maximal 90 Tage pro Jahr.
+
+**Genehmigungsbeschleunigung:** Einführung digitaler Verfahren, um Neubauprojekte innerhalb eines Jahres zu genehmigen.
+
+**Sozialwohnungsquote:** Verpflichtender Anteil von 40 % geförderten Wohnraums in Neubaugebieten.
+
+**Tourismusabgabe:** Einführung einer City-Tax mit direkter Zweckbindung zur Finanzierung sozialen Wohnraums.
+
+**Monitoring-System:** Einrichtung eines offenen Online-Dashboards mit regelmäßigen Updates zu Mietentwicklung, Tourismusaufkommen und Bauaktivitäten.
+
+
+
+## Fazit
+
+Tourismus wirkt als entscheidender Faktor auf den angespannten Münchner Mietmarkt. Um die steigende Mietbelastung nachhaltig abzumildern, braucht es eine koordinierte Strategie aus sofort wirksamen Regulierungen und langfristigen Wohnungsbauprogrammen. Nur mit einer ganzheitlichen, datengetriebenen Politik können die sozialen und ökonomischen Herausforderungen des Münchner Wohnungsmarktes effektiv bewältigt werden.
+
+#   Limitationen
+
+Obwohl die Analyse robuste Befunde liefert, sind mehrere Einschränkungen zu beachten:
+
+1. **Aggregationsniveau (Bezirksebene).**  
+   Die Daten liegen auf Ebene der 25 Münchner Stadtbezirke vor. Innerhalb-Bezirk-Heterogenität (z. B. Quartiersunterschiede) bleibt damit unberücksichtigt, was zu einem **ökologischen Fehlschluss** führen kann.
+
+2. **Proxy-Messung für touristische Attraktivität.**  
+   Die Variable `poi_count_muc` erfasst lediglich die Anzahl touristisch relevanter POI, nicht jedoch **tatsächliche Airbnb-Listings**. Dadurch werden kurzfristige Vermietungseffekte wahrscheinlich unterschätzt.
+
+3. **Genehmigte ≠ gebaute Wohnungen.**  
+   `dwellings_permitted` basiert auf Baugenehmigungen; Fertigstellungsverzögerungen von bis zu drei Jahren sind nicht abgebildet. Die kurzfristige Angebotsreaktion könnte somit überschätzt werden.
+
+4. **Endogenität & Reverse Causality.**  
+   Hohe Mieten können ihrerseits Investoren & Tourismus anziehen. Ohne **Instrumental-Variable-Ansatz** lässt sich Kausalität nur eingeschränkt behaupten.
+
+5. **Pandemie-Sondereffekt.**  
+   Die Jahre 2020/21 weisen extreme Tourismuseinbrüche auf. Trotz Dummy-Kontrolle bleibt ein Restrisiko, dass Schätzkoeffizienten die Normaljahre nicht exakt widerspiegeln.
+
+6. **Inflationsbereinigung.**  
+   Miet- und Baukostendaten sind nominal. Eine Deflationierung könnte Preis- und Mengeneffekte stärker trennen; dies lag außerhalb des Projektumfangs.
+
+**Folgerung:** Die Resultate sollten daher nicht als exakte Kausalschätzungen verstanden werden, sondern als **erste Evidenz** für die Richtung & Größenordnung des Tourismus-Effekts auf Münchner Mieten. Weitere Forschung mit mikrodatenbasierten Instrumenten wird empfohlen.
+
+
+
+# Anhang
+
+## Daten-Dictonary
+
+```{r dict-and-links, echo=FALSE, results='asis'}
+library(tibble)
+library(knitr)
+library(kableExtra)
+
+# 1) Daten-Dictionary -------------------------------------------------
+dict <- tribble(
+  ~Variable,              ~Einheit,                ~Quelle,
+  "rent_mean_eur_m2",     "€/m²",                  "Mietspiegel 2025 (Stadt München)",
+  "overnights_by",        "Anzahl Übernachtungen", "BY-Open-Data - Tourismusstatistik",
+  "poi_count_muc",        "Anzahl POI",            "Open Data München - POI",
+  "dwellings_permitted",  "Anzahl Wohnungen",      "BY-Open-Data - Baugenehmigungen",
+  "population",           "Personen",              "BY-Open-Data - Bevölkerungsstand",
+  "year",                 "Jahr (integer)",        "abgeleitet"
+) %>% 
+  kable(
+    caption  = "Tab. X - Daten-Dictionary der Analysevariablen",
+    booktabs = TRUE,
+    align    = "lcc"
+  ) %>% 
+  kable_styling(full_width = FALSE)
+
+# 2) Open-Data-Quellen -----------------------------------------------
+sources <- tribble(
+  ~Datensatz,                      ~Link,
+  "Mietspiegel 2025 (PDF)",        "<https://www.muenchen.de/rathaus/Stadtinfos/Statistik/Mietspiegel.html>",
+  "Population BY-Open-Data",       "<https://open.bydata.de/datasets/12411-000-d?locale=de/>",
+  "Tourismus BY-Open-Data",        "<https://open.bydata.de/datasets/https-opendata-muenchen-de-dataset-touristische-points-of-interests-poi-muenchen?locale=de>",
+  "Baugenehmigungen BY-Open-Data", "<https://open.bydata.de/datasets/https-opendata-muenchen-de-dataset-indikatorenatlas-baugenehmigungen?locale=de>"
+) %>% 
+  kable(
+    caption  = "Tab. Y - Primäre Open-Data-Quellen",
+    booktabs = TRUE,
+    escape   = FALSE,   # Links HTML-belassen
+    align    = "ll"
+  ) %>% 
+  kable_styling(full_width = FALSE)
+
+# 3) Beide Tabellen direkt ausgeben (kein print!)
+dict
+cat("\n\n")   # Abstand
+sources
+```
+
+## Literatur
+
+- Hilber,C.(2023). *Urban Economics and Housing Markets*. Cambridge University Press.  
+- Hübscher,A.; Borst,B.(2023). *Airbnb, Over-Tourism and Urban Housing*. *Journal of Urban Studies*.  
+- Law,J.; Marcinczak,S.(2024). *Tourism and Urban Development: A Critical Analysis*. Routledge.  
+- Meleddu,M.(2021). *Tourism and Housing Prices*. *International Journal of Tourism Economics*.
+
+## Session-Info
+```{r sessioninfo}
+sessionInfo()
+```
+
+
